@@ -12,6 +12,7 @@ import json
 load_dotenv()
 ACM_API_KEY = os.getenv('ACM_API_KEY')
 IEEE_API_KEY = os.getenv('IEEE_API_KEY')
+ELSEVIER_API_KEY = os.getenv('ELSEVIER_API_KEY')
 
 # TODO: not sure if acm has an api, maybe use crossref instead
 def query_acm(query):
@@ -19,26 +20,26 @@ def query_acm(query):
         return None
     url = f"https://api.acm.org/v1/articles?query={query}&apikey={ACM_API_KEY}"
     response = requests.get(url)
+    if response.status_code != 200:
+        print("ACM API request failed with status code {}".format(response.status_code))
+        return None
     data = response.json()
-    return data
+    keywords = []
+    for paper in data['articles']:
+        if 'keywords' in paper:
+            for keyword in paper['keywords']:
+                keywords.append(keyword)
+    return keywords
 
 def query_ieee(query):
     if not IEEE_API_KEY:
         return None
     url = f"https://ieeexploreapi.ieee.org/api/v1/search/articles?apikey={IEEE_API_KEY}&querytext={query}"
     response = requests.get(url)
+    if response.status_code != 200:
+        print("IEEE API request failed with status code {}".format(response.status_code))
+        return None
     data = response.json()
-    return data
-
-def extract_keywords_acm(data):
-    keywords = []
-    for paper in data['articles']:
-        if 'keywords' in paper:
-            for keyword in paper['keywords']
-                keywords.append(keyword)
-    return keywords
-
-def extract_keywords_ieee(data):
     keywords = []
     for paper in data['articles']:
         if 'keywords' in paper:
@@ -46,6 +47,29 @@ def extract_keywords_ieee(data):
                 for keyword in keyword_group['keyword']:
                     keywords.append(keyword)
     return keywords
+
+
+def query_elsevier(query):
+    url = "https://api.elsevier.com/content/search/scopus"
+    params = {
+        "query": query,
+        "apiKey": ELSEVIER_API_KEY,
+        "count": 10,  # Number of results to fetch
+        "view": "complete",  # required to get authkeywords
+    }
+
+    response = requests.get(url, params=params)
+    if response.status_code != 200:
+        print("Elsevier API request failed with status code {}".format(response.status_code))
+        return None
+
+    keywords = []
+    for entry in response.json()['search-results']['entry']:
+        if 'authkeywords' in entry:
+            keywords.extend(entry['authkeywords'].split("|"))
+
+    return list(set(keywords))  # Remove duplicates
+
 
 def rank_keywords(keywords):
     counter = Counter(keywords)
@@ -65,14 +89,19 @@ if __name__ == "__main__":
     all_keywords = []
 
     if ACM_API_KEY:
-        acm_data = query_acm(args.search_string)
-        acm_keywords = extract_keywords_acm(acm_data)
-        all_keywords += acm_keywords
+        acm_keywords = query_acm(args.search_string)
+        if acm_keywords:
+            all_keywords += acm_keywords
 
     if IEEE_API_KEY:
-        ieee_data = query_ieee(args.search_string)
-        ieee_keywords = extract_keywords_ieee(ieee_data)
-        all_keywords += ieee_keywords
+        ieee_keywords = query_ieee(args.search_string)
+        if ieee_keywords:
+            all_keywords += ieee_keywords
+
+    if ELSEVIER_API_KEY:
+        elsevier_keywords = query_elsevier(args.search_string)
+        if elsevier_keywords:
+            all_keywords += elsevier_keywords
 
     # Rank keywords
     ranked_keywords = rank_keywords(all_keywords)
